@@ -232,6 +232,8 @@ void command_loop(Onzero onzero) {
          // Wait for any command in flight to be finished running.
          command_ready_condition.wait(
                  lk,
+                 // Have to use CMD:: namespace qualifier to avoid referring
+                 // to local variable.
                  []() { return CMD::command == nullptr; }
          );
          // The lock will automatically be released when lk goes out of scope.
