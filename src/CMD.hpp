@@ -161,28 +161,18 @@ void engine_loop(
                  }
          );
          if (!stop.stop_requested() && command != nullptr) {
-            // Copy out command and arguments.
-            auto command_copy = command;
-            // So, if someone changes the type of arguments,
-            // this will still be right.
-            decltype(arguments) arg_copy;
-            // Using swap in this way here cleanly sets arguments to be
-            // again empty, while simultaneously copying its old value
-            // (the value before it was empty) into arg_copy.
-            arg_copy.swap(arguments);
-            // Now rest command to nullptr to indicate we have it and
-            // are ready for a new command.
+            // Keep the lock and execute the command to keep the prompt from
+            // printing while the command is executing.
+            execute_command(command, arguments);
+            // Now clear out the command and arguments to signal that execution
+            // has completed.
             command = nullptr;
-            // Unlock since we're done messing with
-            // command and arguments now.
+            arguments.clear();
+            // Unlock the lock.
             lk.unlock();
-            // Notify the command reading and parsing loop if it's
-            // waiting to set a command so it can wake up and see that
-            // the command is empty now.
+            // Inform anybody waiting on the condition variable that the
+            // condition they care about may have changed.
             command_ready_condition.notify_all();
-            // Finally execute the command in the context of the game
-            // engine loop.
-            execute_command(command_copy, ::std::move(arg_copy));
          }
       }
       if (!stop.stop_requested()) {
@@ -234,6 +224,18 @@ void command_loop(Onzero onzero) {
    bool exited = false;
    while(!exited) {
       str command;
+      // This block will wait for any current command to run before printing
+      // the prompt.
+      {
+         // Acquire the lock so we can look at the value of command.
+         ::std::unique_lock lk{command_mutex};
+         // Wait for any command in flight to be finished running.
+         command_ready_condition.wait(
+                 lk,
+                 []() { return CMD::command == nullptr; }
+         );
+         // The lock will automatically be released when lk goes out of scope.
+      }
       // Use ::std::flush to make sure prompt appears
       // before read.
       std::cout << prompt << ::std::flush;
